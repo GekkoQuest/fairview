@@ -1,11 +1,45 @@
 use crate::Process;
+use crate::config::Config;
 use sysinfo::System;
+use std::time::SystemTime;
+use std::collections::HashMap;
 
-pub struct ProcessMonitor;
+pub struct ProcessMonitor {
+    baseline_processes: HashMap<u32, ProcessBaseline>,
+    config: Config,
+}
+
+#[derive(Debug, Clone)]
+struct ProcessBaseline {
+    name: String,
+    path: String,
+    start_time: SystemTime,
+}
 
 impl ProcessMonitor {
-    pub fn new() -> Self {
-        Self
+    pub fn new(config: Config) -> Self {
+        Self {
+            baseline_processes: HashMap::new(),
+            config,
+        }
+    }
+
+    pub fn collect_baseline(&mut self) {
+        println!("[*] Collecting baseline processes...");
+        let processes = self.get_all_processes();
+        
+        for process in processes {
+            self.baseline_processes.insert(
+                process.pid,
+                ProcessBaseline {
+                    name: process.name.clone(),
+                    path: process.path.clone(),
+                    start_time: SystemTime::now(),
+                },
+            );
+        }
+        
+        println!("[+] Baseline collected: {} processes", self.baseline_processes.len());
     }
 
     pub fn get_all_processes(&self) -> Vec<Process> {
@@ -27,6 +61,29 @@ impl ProcessMonitor {
         processes
     }
 
+    pub fn was_in_baseline(&self, pid: u32) -> bool {
+        self.baseline_processes.contains_key(&pid)
+    }
+
+    pub fn is_whitelisted(&self, process: &Process) -> bool {
+        let name_lower = process.name.to_lowercase();
+        let path_lower = process.path.to_lowercase();
+
+        for whitelisted in &self.config.whitelist.processes {
+            if name_lower.contains(&whitelisted.to_lowercase()) {
+                return true;
+            }
+        }
+
+        for whitelisted_dir in &self.config.whitelist.directories {
+            if path_lower.starts_with(&whitelisted_dir.to_lowercase()) {
+                return true;
+            }
+        }
+
+        false
+    }
+
     pub fn has_screen_capture_permission(&self, process: &Process) -> bool {
         #[cfg(target_os = "macos")]
         {
@@ -40,7 +97,6 @@ impl ProcessMonitor {
 
         #[cfg(target_os = "linux")]
         {
-            // For Linux, use heuristic based on process name
             let name_lower = process.name.to_lowercase();
             let known_apps = ["obs", "zoom", "teams", "discord", "slack", "chrome", "firefox"];
             let suspicious = ["cluely", "interview", "assistant", "helper"];

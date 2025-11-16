@@ -47,6 +47,16 @@ impl HardwareDetector {
         }
     }
 
+    pub fn set_baseline(&mut self) -> Result<(), String> {
+        let config = self.get_current_display_configuration()?;
+        self.baseline_displays = Some(config);
+        Ok(())
+    }
+
+    pub fn get_baseline(&self) -> Option<&DisplayConfiguration> {
+        self.baseline_displays.as_ref()
+    }
+
     pub fn detect_hardware_cheating(&self) -> HardwareSuspicion {
         let mut suspicion = HardwareSuspicion {
             risk_score: 0.0,
@@ -57,7 +67,8 @@ impl HardwareDetector {
         let current_config = match self.get_current_display_configuration() {
             Ok(config) => config,
             Err(e) => {
-                suspicion.flags.push(format!("Failed to get display config: {}", e));
+                suspicion.flags.push(format!("Unable to detect display configuration: {}", e));
+                suspicion.details.insert("error".to_string(), "display_detection_failed".to_string());
                 return suspicion;
             }
         };
@@ -81,8 +92,20 @@ impl HardwareDetector {
 
         if let Some(ref baseline) = self.baseline_displays {
             if baseline.display_count != current_config.display_count {
-                suspicion.flags.push("Display configuration changed during interview".to_string());
+                suspicion.flags.push(format!(
+                    "Display configuration changed during interview (baseline: {}, current: {})",
+                    baseline.display_count,
+                    current_config.display_count
+                ));
                 suspicion.risk_score += 0.4;
+            }
+
+            let baseline_ids: Vec<_> = baseline.displays.iter().map(|d| &d.id).collect();
+            for display in &current_config.displays {
+                if !baseline_ids.contains(&&display.id) {
+                    suspicion.flags.push(format!("New display connected during interview: {}", display.name));
+                    suspicion.risk_score += 0.3;
+                }
             }
         }
 
