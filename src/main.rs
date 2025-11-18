@@ -7,12 +7,14 @@ mod config;
 mod hardware_detector;
 mod overlay_detector;
 mod process_monitor;
+mod vm_detector;
 
 use audio_detector::AudioCaptureDetector;
 use config::Config;
 use hardware_detector::HardwareDetector;
 use overlay_detector::OverlayDetector;
 use process_monitor::ProcessMonitor;
+use vm_detector::VmDetector;
 
 #[derive(Debug, Clone)]
 pub struct Process {
@@ -41,6 +43,7 @@ pub struct DetectionReport {
     pub hidden_overlays: Vec<OverlayWindow>,
     pub audio_monitoring_detected: bool,
     pub hardware_suspicion: Option<HardwareSuspicionReport>,
+    pub vm_detection: Option<vm_detector::VmCheckResult>,
     pub overall_risk_score: f64,
     pub exceeds_threshold: bool,
     pub module_failures: Vec<String>,
@@ -87,6 +90,7 @@ pub struct FairviewDetector {
     audio_detector: AudioCaptureDetector,
     overlay_detector: OverlayDetector,
     hardware_detector: HardwareDetector,
+    vm_detector: VmDetector,
     config: Config,
     scan_count: usize,
     baseline_collected: bool,
@@ -99,6 +103,7 @@ impl FairviewDetector {
             audio_detector: AudioCaptureDetector::new(),
             overlay_detector: OverlayDetector::new(),
             hardware_detector: HardwareDetector::new(),
+            vm_detector: VmDetector::new(),
             config,
             scan_count: 0,
             baseline_collected: false,
@@ -138,6 +143,26 @@ impl FairviewDetector {
 
         let mut module_failures = Vec::new();
 
+        let vm_result = if self.config.monitoring.enable_vm_detection {
+             match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                self.vm_detector.detect()
+            })) {
+                Ok(result) => {
+                    if result.is_vm {
+                         println!("[!] VM DETECTED! Confidence: {:.2}", result.confidence_score);
+                    }
+                    Some(result)
+                },
+                Err(_) => {
+                    let error = "VM detection module failed";
+                    module_failures.push(error.to_string());
+                    None
+                }
+            }
+        } else {
+            None
+        };
+
         let suspicious_processes = if self.config.monitoring.enable_process_monitoring {
             match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                 self.scan_for_suspicious_processes()
@@ -150,14 +175,10 @@ impl FairviewDetector {
                     let error = "Process monitoring module failed";
                     module_failures.push(error.to_string());
                     println!("[!] {}", error);
-                    if !self.config.monitoring.continue_on_module_failure {
-                        panic!("Critical module failure: process monitoring");
-                    }
                     Vec::new()
                 }
             }
         } else {
-            println!("[*] Process monitoring disabled");
             Vec::new()
         };
 
@@ -172,15 +193,10 @@ impl FairviewDetector {
                 Err(_) => {
                     let error = "Overlay detection module failed";
                     module_failures.push(error.to_string());
-                    println!("[!] {}", error);
-                    if !self.config.monitoring.continue_on_module_failure {
-                        panic!("Critical module failure: overlay detection");
-                    }
                     Vec::new()
                 }
             }
         } else {
-            println!("[*] Overlay monitoring disabled");
             Vec::new()
         };
 
@@ -195,15 +211,10 @@ impl FairviewDetector {
                 Err(_) => {
                     let error = "Audio detection module failed";
                     module_failures.push(error.to_string());
-                    println!("[!] {}", error);
-                    if !self.config.monitoring.continue_on_module_failure {
-                        panic!("Critical module failure: audio detection");
-                    }
                     false
                 }
             }
         } else {
-            println!("[*] Audio monitoring disabled");
             false
         };
 
@@ -218,15 +229,10 @@ impl FairviewDetector {
                 Err(_) => {
                     let error = "Hardware detection module failed";
                     module_failures.push(error.to_string());
-                    println!("[!] {}", error);
-                    if !self.config.monitoring.continue_on_module_failure {
-                        panic!("Critical module failure: hardware detection");
-                    }
                     None
                 }
             }
         } else {
-            println!("[*] Hardware monitoring disabled");
             None
         };
 
@@ -235,6 +241,7 @@ impl FairviewDetector {
             &hidden_overlays,
             audio_monitoring,
             hardware_suspicion.as_ref(),
+            vm_result.as_ref(),
         );
 
         let exceeds_threshold = overall_risk >= self.config.scan.risk_threshold;
@@ -275,6 +282,7 @@ impl FairviewDetector {
             hidden_overlays,
             audio_monitoring_detected: audio_monitoring,
             hardware_suspicion: hardware_report,
+            vm_detection: vm_result,
             overall_risk_score: overall_risk,
             exceeds_threshold,
             module_failures,
@@ -397,21 +405,14 @@ impl FairviewDetector {
     fn is_common_legit_app(&self, name: &str) -> bool {
         let name_lower = name.to_lowercase();
         let whitelist = [
-            // Browsers
             "explorer.exe", "chrome.exe", "firefox.exe", "msedge.exe", 
             "msedgewebview2.exe", "brave.exe", "opera.exe",
-            // Communication apps
             "discord.exe", "slack.exe", "teams.exe", "zoom.exe",
-            // Development tools
             "code.exe", "vscode.exe", "visual studio",
-            // Screen capture/streaming (legitimate uses)
             "sharex.exe", "obs", "obs64.exe", "streamlabs",
-            // Gaming
             "steam.exe", "steamwebhelper.exe",
-            // Windows system
             "svchost.exe", "searchhost.exe", "applicationframehost.exe",
             "shellexperiencehost.exe", "systemsettings.exe",
-            // Camera/peripherals
             "camera hub.exe", "elgato",
         ];
         whitelist.iter().any(|w| name_lower == *w || name_lower.contains(*w))
@@ -423,6 +424,7 @@ impl FairviewDetector {
         hidden_overlays: &[OverlayWindow],
         audio_monitoring: bool,
         hardware_suspicion: Option<&hardware_detector::HardwareSuspicion>,
+        vm_result: Option<&vm_detector::VmCheckResult>,
     ) -> f64 {
         let mut risk = 0.0;
 
@@ -447,6 +449,12 @@ impl FairviewDetector {
             risk += hardware.risk_score * self.config.weights.hardware_risk;
         }
 
+        if let Some(vm) = vm_result {
+            if vm.is_vm {
+                risk += vm.confidence_score * self.config.weights.vm_risk;
+            }
+        }
+
         risk.min(1.0)
     }
 }
@@ -458,9 +466,19 @@ fn print_report(report: &DetectionReport, config: &Config) {
     println!("FAIRVIEW DETECTION REPORT - Scan #{}", report.scan_number);
     println!("{}", "=".repeat(60));
     println!("Timestamp: {}", datetime.format("%Y-%m-%d %H:%M:%S UTC"));
-    println!("Interview Type: {}", config.scan.interview_type);
+    
+    if let Some(ref vm) = report.vm_detection {
+        if vm.is_vm {
+            println!("\n🔴 🔴 CRITICAL: VIRTUAL MACHINE DETECTED 🔴 🔴");
+            println!("Confidence Score: {:.2}", vm.confidence_score);
+            for reason in &vm.reasons {
+                println!("  - {}", reason);
+            }
+            println!();
+        }
+    }
+
     println!("Overall Risk Score: {:.2}/1.0", report.overall_risk_score);
-    println!("Risk Threshold: {:.2}", config.scan.risk_threshold);
     
     if report.exceeds_threshold {
         println!("⚠️  STATUS: RISK THRESHOLD EXCEEDED");
@@ -481,7 +499,6 @@ fn print_report(report: &DetectionReport, config: &Config) {
         println!("SUSPICIOUS PROCESSES:");
         for proc in &report.suspicious_processes {
             println!("  - {} (PID: {})", proc.name, proc.pid);
-            println!("    Path: {}", proc.path);
             println!("    Risk Score: {:.2}", proc.risk_score);
             if proc.started_during_interview {
                 println!("    ⚠️  Started during interview");
@@ -498,8 +515,6 @@ fn print_report(report: &DetectionReport, config: &Config) {
         println!("HIDDEN OVERLAYS DETECTED:");
         for overlay in &report.hidden_overlays {
             println!("  - Window Handle: {}", overlay.handle);
-            println!("    Owner PID: {}", overlay.owner_pid);
-            println!("    Position: {:?}", overlay.position);
             println!("    Size: {:?}", overlay.size);
             println!();
         }
@@ -519,9 +534,8 @@ fn print_report(report: &DetectionReport, config: &Config) {
         println!("  Display Count: {}", hardware.display_count);
         
         if let Some(baseline) = hardware.baseline_display_count {
-            println!("  Baseline Display Count: {}", baseline);
             if hardware.display_changed {
-                println!("  ⚠️  Display configuration changed!");
+                println!("  ⚠️  Display configuration changed (Baseline: {})", baseline);
             }
         }
 
@@ -589,12 +603,9 @@ async fn main() {
         if let Ok(json) = serde_json::to_string_pretty(&report) {
             if let Err(e) = std::fs::write(&filename, json) {
                 println!("[!] Failed to write report to {}: {}", filename, e);
-            } else {
-                println!("[+] Report saved to {}", filename);
             }
         }
 
-        println!("Waiting {} seconds before next scan...\n", config.scan.interval_seconds);
         tokio::time::sleep(Duration::from_secs(config.scan.interval_seconds)).await;
     }
 }

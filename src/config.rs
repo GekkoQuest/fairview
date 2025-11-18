@@ -24,6 +24,7 @@ pub struct WeightsConfig {
     pub overlay_risk: f64,
     pub audio_risk: f64,
     pub hardware_risk: f64,
+    pub vm_risk: f64, 
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -46,6 +47,7 @@ pub struct MonitoringConfig {
     pub enable_hardware_monitoring: bool,
     pub enable_audio_monitoring: bool,
     pub enable_overlay_monitoring: bool,
+    pub enable_vm_detection: bool,
     pub collect_baseline: bool,
     pub baseline_duration_seconds: u64,
     pub continue_on_module_failure: bool,
@@ -72,10 +74,11 @@ impl Config {
                 interview_type: "coding".to_string(),
             },
             weights: WeightsConfig {
-                process_risk: 0.4,
-                overlay_risk: 0.25,
-                audio_risk: 0.15,
-                hardware_risk: 0.2,
+                process_risk: 0.30,
+                overlay_risk: 0.20,
+                audio_risk: 0.10,
+                hardware_risk: 0.15,
+                vm_risk: 0.25,
             },
             thresholds: ThresholdsConfig {
                 process_threshold: 0.6,
@@ -103,6 +106,7 @@ impl Config {
                 enable_hardware_monitoring: true,
                 enable_audio_monitoring: true,
                 enable_overlay_monitoring: true,
+                enable_vm_detection: true,
                 collect_baseline: true,
                 baseline_duration_seconds: 10,
                 continue_on_module_failure: true,
@@ -114,7 +118,8 @@ impl Config {
         let weight_sum = self.weights.process_risk 
             + self.weights.overlay_risk 
             + self.weights.audio_risk 
-            + self.weights.hardware_risk;
+            + self.weights.hardware_risk
+            + self.weights.vm_risk;
         
         if (weight_sum - 1.0).abs() > 0.01 {
             return Err(format!(
@@ -126,24 +131,13 @@ impl Config {
         if self.weights.process_risk < 0.0 
             || self.weights.overlay_risk < 0.0 
             || self.weights.audio_risk < 0.0 
-            || self.weights.hardware_risk < 0.0 {
+            || self.weights.hardware_risk < 0.0 
+            || self.weights.vm_risk < 0.0 {
             return Err("All weights must be positive".to_string());
         }
 
         if self.scan.risk_threshold < 0.0 || self.scan.risk_threshold > 1.0 {
             return Err("risk_threshold must be between 0.0 and 1.0".to_string());
-        }
-
-        if self.thresholds.process_threshold < 0.0 || self.thresholds.process_threshold > 1.0 {
-            return Err("process_threshold must be between 0.0 and 1.0".to_string());
-        }
-
-        let valid_types = ["coding", "behavioral", "technical", "general"];
-        if !valid_types.contains(&self.scan.interview_type.as_str()) {
-            return Err(format!(
-                "Invalid interview_type '{}'. Must be one of: {:?}",
-                self.scan.interview_type, valid_types
-            ));
         }
 
         Ok(())
@@ -173,14 +167,14 @@ mod tests {
     #[test]
     fn test_invalid_weights() {
         let mut config = Config::default();
-        config.weights.process_risk = 0.5; // Sum > 1.0
+        config.weights.process_risk = 0.5;
         assert!(config.validate().is_err());
     }
 
     #[test]
     fn test_invalid_threshold() {
         let mut config = Config::default();
-        config.scan.risk_threshold = 1.5; // Out of range
+        config.scan.risk_threshold = 1.5;
         assert!(config.validate().is_err());
     }
 
