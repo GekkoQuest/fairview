@@ -1,156 +1,128 @@
+use crate::error::{Error, Result};
+use crate::evidence::Severity;
 use serde::{Deserialize, Serialize};
-use std::fs;
 use std::path::Path;
 
-#[derive(Debug, Clone, Deserialize, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Config {
     pub scan: ScanConfig,
-    pub weights: WeightsConfig,
-    pub thresholds: ThresholdsConfig,
-    pub whitelist: WhitelistConfig,
+    pub session: SessionConfig,
     pub monitoring: MonitoringConfig,
+    pub output: OutputConfig,
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ScanConfig {
     pub interval_seconds: u64,
-    pub risk_threshold: f64,
-    pub interview_type: String,
+    /// Alert when a finding at this severity or above is unexpected.
+    pub alert_level: String,
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize)]
-pub struct WeightsConfig {
-    pub process_risk: f64,
-    pub overlay_risk: f64,
-    pub audio_risk: f64,
-    pub hardware_risk: f64,
-    pub vm_risk: f64, 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SessionConfig {
+    /// Image names that belong to this interview (browser, IDE, meeting app).
+    pub expected_processes: Vec<String>,
+    /// Dual / extra physical monitors are normal for many candidates.
+    pub allow_extra_displays: bool,
+    pub allow_vm_guest: bool,
+    pub allow_virtual_camera: bool,
+    /// Zoom/Teams/Meet-class apps are expected mic users even if omitted above.
+    pub assume_meeting_apps: bool,
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize)]
-pub struct ThresholdsConfig {
-    pub process_threshold: f64,
-    pub hardware_threshold: f64,
-    pub audio_threshold: f64,
-    pub overlay_threshold: f64,
-}
-
-#[derive(Debug, Clone, Deserialize, Serialize)]
-pub struct WhitelistConfig {
-    pub processes: Vec<String>,
-    pub directories: Vec<String>,
-}
-
-#[derive(Debug, Clone, Deserialize, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MonitoringConfig {
-    pub enable_process_monitoring: bool,
-    pub enable_hardware_monitoring: bool,
-    pub enable_audio_monitoring: bool,
-    pub enable_overlay_monitoring: bool,
-    pub enable_vm_detection: bool,
-    pub collect_baseline: bool,
-    pub baseline_duration_seconds: u64,
-    pub continue_on_module_failure: bool,
+    pub process: bool,
+    pub overlay: bool,
+    pub audio: bool,
+    pub display: bool,
+    pub remote: bool,
+    pub environment: bool,
+    pub camera: bool,
 }
 
-impl Config {
-    pub fn from_file<P: AsRef<Path>>(path: P) -> Result<Self, String> {
-        let contents = fs::read_to_string(path)
-            .map_err(|e| format!("Failed to read config file: {}", e))?;
-        
-        let config: Config = toml::from_str(&contents)
-            .map_err(|e| format!("Failed to parse config file: {}", e))?;
-        
-        config.validate()?;
-        
-        Ok(config)
-    }
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct OutputConfig {
+    pub directory: String,
+    pub write_json: bool,
+}
 
-    pub fn default() -> Self {
+impl Default for Config {
+    fn default() -> Self {
         Self {
             scan: ScanConfig {
                 interval_seconds: 30,
-                risk_threshold: 0.5,
-                interview_type: "coding".to_string(),
+                alert_level: "medium".into(),
             },
-            weights: WeightsConfig {
-                process_risk: 0.30,
-                overlay_risk: 0.20,
-                audio_risk: 0.10,
-                hardware_risk: 0.15,
-                vm_risk: 0.25,
-            },
-            thresholds: ThresholdsConfig {
-                process_threshold: 0.6,
-                hardware_threshold: 0.5,
-                audio_threshold: 0.3,
-                overlay_threshold: 0.4,
-            },
-            whitelist: WhitelistConfig {
-                processes: vec![
-                    "code.exe".to_string(),
-                    "vscode.exe".to_string(),
-                    "chrome.exe".to_string(),
-                    "firefox.exe".to_string(),
-                    "msedge.exe".to_string(),
+            session: SessionConfig {
+                expected_processes: vec![
+                    "chrome.exe".into(),
+                    "msedge.exe".into(),
+                    "firefox.exe".into(),
+                    "code.exe".into(),
+                    "zoom.exe".into(),
+                    "ms-teams.exe".into(),
+                    "Teams.exe".into(),
                 ],
-                directories: vec![
-                    "C:\\Program Files\\Git".to_string(),
-                    "C:\\Windows\\System32".to_string(),
-                    "/usr/bin".to_string(),
-                    "/Applications".to_string(),
-                ],
+                allow_extra_displays: true,
+                allow_vm_guest: false,
+                allow_virtual_camera: false,
+                assume_meeting_apps: true,
             },
             monitoring: MonitoringConfig {
-                enable_process_monitoring: true,
-                enable_hardware_monitoring: true,
-                enable_audio_monitoring: true,
-                enable_overlay_monitoring: true,
-                enable_vm_detection: true,
-                collect_baseline: true,
-                baseline_duration_seconds: 10,
-                continue_on_module_failure: true,
+                process: true,
+                overlay: true,
+                audio: true,
+                display: true,
+                remote: true,
+                environment: true,
+                camera: true,
+            },
+            output: OutputConfig {
+                directory: "fairview-reports".into(),
+                write_json: true,
             },
         }
     }
+}
 
-    fn validate(&self) -> Result<(), String> {
-        let weight_sum = self.weights.process_risk 
-            + self.weights.overlay_risk 
-            + self.weights.audio_risk 
-            + self.weights.hardware_risk
-            + self.weights.vm_risk;
-        
-        if (weight_sum - 1.0).abs() > 0.01 {
-            return Err(format!(
-                "Weights must sum to 1.0, got {:.2}",
-                weight_sum
-            ));
-        }
+impl Config {
+    pub fn from_file(path: impl AsRef<Path>) -> Result<Self> {
+        let contents = std::fs::read_to_string(path)?;
+        let config: Config = toml::from_str(&contents).map_err(|e| Error::Config(e.to_string()))?;
+        config.validate()?;
+        Ok(config)
+    }
 
-        if self.weights.process_risk < 0.0 
-            || self.weights.overlay_risk < 0.0 
-            || self.weights.audio_risk < 0.0 
-            || self.weights.hardware_risk < 0.0 
-            || self.weights.vm_risk < 0.0 {
-            return Err("All weights must be positive".to_string());
-        }
-
-        if self.scan.risk_threshold < 0.0 || self.scan.risk_threshold > 1.0 {
-            return Err("risk_threshold must be between 0.0 and 1.0".to_string());
-        }
-
+    pub fn save_to_file(&self, path: impl AsRef<Path>) -> Result<()> {
+        let toml = toml::to_string_pretty(self).map_err(|e| Error::Config(e.to_string()))?;
+        std::fs::write(path, toml)?;
         Ok(())
     }
 
-    pub fn save_to_file<P: AsRef<Path>>(&self, path: P) -> Result<(), String> {
-        let toml_string = toml::to_string_pretty(self)
-            .map_err(|e| format!("Failed to serialize config: {}", e))?;
-        
-        fs::write(path, toml_string)
-            .map_err(|e| format!("Failed to write config file: {}", e))?;
-        
+    pub fn validate(&self) -> Result<()> {
+        if self.scan.interval_seconds == 0 {
+            return Err(Error::Config("interval_seconds must be > 0".into()));
+        }
+        if Severity::from_name(&self.scan.alert_level).is_none() {
+            return Err(Error::Config(format!(
+                "alert_level must be info|low|medium|high|critical, got {}",
+                self.scan.alert_level
+            )));
+        }
         Ok(())
+    }
+
+    pub fn alert_level(&self) -> Severity {
+        Severity::from_name(&self.scan.alert_level).unwrap_or(Severity::Medium)
+    }
+
+    pub fn is_expected_name(&self, name: &str) -> bool {
+        let n = crate::known::normalize_image_name(name);
+        self.session
+            .expected_processes
+            .iter()
+            .any(|e| crate::known::normalize_image_name(e) == n)
     }
 }
 
@@ -159,29 +131,22 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_default_config_is_valid() {
-        let config = Config::default();
-        assert!(config.validate().is_ok());
+    fn default_is_valid() {
+        assert!(Config::default().validate().is_ok());
     }
 
     #[test]
-    fn test_invalid_weights() {
-        let mut config = Config::default();
-        config.weights.process_risk = 0.5;
-        assert!(config.validate().is_err());
+    fn rejects_bad_alert_level() {
+        let mut c = Config::default();
+        c.scan.alert_level = "banana".into();
+        assert!(c.validate().is_err());
     }
 
     #[test]
-    fn test_invalid_threshold() {
-        let mut config = Config::default();
-        config.scan.risk_threshold = 1.5;
-        assert!(config.validate().is_err());
-    }
-
-    #[test]
-    fn test_invalid_interview_type() {
-        let mut config = Config::default();
-        config.scan.interview_type = "invalid".to_string();
-        assert!(config.validate().is_err());
+    fn expected_name_is_exact() {
+        let c = Config::default();
+        assert!(c.is_expected_name("chrome.exe"));
+        assert!(c.is_expected_name("CHROME"));
+        assert!(!c.is_expected_name("chrome-beta-helper"));
     }
 }

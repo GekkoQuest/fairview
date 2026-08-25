@@ -1,0 +1,9 @@
+/target
+/fairview-reports
+/detection_report_*.json
+fairview_config.toml
+*.pdb
+.idea
+.vscode
+*.swp
+.DS_Store
