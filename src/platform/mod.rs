@@ -15,7 +15,7 @@ mod windows;
 #[cfg(windows)]
 pub use windows::{
     collect_audio, collect_cameras, collect_displays, collect_overlays, collect_remote,
-    enrich_processes, fill_environment,
+    enrich_processes, fill_environment, verify_signature,
 };
 
 #[cfg(target_os = "macos")]
@@ -23,7 +23,7 @@ mod macos;
 #[cfg(target_os = "macos")]
 pub use macos::{
     collect_audio, collect_cameras, collect_displays, collect_overlays, collect_remote,
-    enrich_processes, fill_environment,
+    enrich_processes, fill_environment, verify_signature,
 };
 
 #[cfg(target_os = "linux")]
@@ -31,7 +31,7 @@ mod linux;
 #[cfg(target_os = "linux")]
 pub use linux::{
     collect_audio, collect_cameras, collect_displays, collect_overlays, collect_remote,
-    enrich_processes, fill_environment,
+    enrich_processes, fill_environment, verify_signature,
 };
 
 #[cfg(not(any(windows, target_os = "macos", target_os = "linux")))]
@@ -66,6 +66,11 @@ pub fn fill_environment(_facts: &mut EnvironmentFacts) -> Result<()> {
 
 #[cfg(not(any(windows, target_os = "macos", target_os = "linux")))]
 pub fn enrich_processes(_procs: &mut [ProcessSnapshot]) {}
+
+#[cfg(not(any(windows, target_os = "macos", target_os = "linux")))]
+pub fn verify_signature(_path: &std::path::Path) -> crate::origin::SignatureStatus {
+    crate::origin::SignatureStatus::Unknown
+}
 
 pub fn cpuid_hypervisor() -> (bool, Option<String>) {
     #[cfg(target_arch = "x86_64")]

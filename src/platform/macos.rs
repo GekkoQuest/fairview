@@ -14,9 +14,14 @@ use core_graphics::display::{
 };
 use serde_json::Value;
 use std::ffi::CString;
+use std::path::Path;
 use std::process::Command;
 
 pub fn enrich_processes(_procs: &mut [ProcessSnapshot]) {}
+
+pub fn verify_signature(_path: &Path) -> crate::origin::SignatureStatus {
+    crate::origin::SignatureStatus::Unknown
+}
 
 pub fn collect_displays() -> Result<Vec<DisplayInfo>> {
     let ids = CGDisplay::active_displays().unwrap_or_default();

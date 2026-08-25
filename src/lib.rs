@@ -4,12 +4,14 @@
 //! for a given session. Reports talk about findings, not "cheating".
 
 pub mod config;
+pub mod correlate;
 pub mod detect;
 pub mod display;
 pub mod edid;
 pub mod error;
 pub mod evidence;
 pub mod known;
+pub mod origin;
 pub mod overlay;
 pub mod policy;
 pub mod process;

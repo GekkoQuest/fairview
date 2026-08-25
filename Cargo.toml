@@ -46,6 +46,8 @@ windows = { version = "0.58", features = [
     "Win32_Devices_Display",
     "Win32_Devices_DeviceAndDriverInstallation",
     "Win32_Storage_FileSystem",
+    "Win32_Security_WinTrust",
+    "Win32_Security_Cryptography",
 ] }
 
 [target.'cfg(target_os = "macos")'.dependencies]

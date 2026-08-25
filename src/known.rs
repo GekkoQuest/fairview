@@ -220,8 +220,8 @@ pub const OS_NOISE: &[&str] = &[
 
 pub fn normalize_image_name(name: &str) -> String {
     let n = name.rsplit(['/', '\\']).next().unwrap_or(name);
-    let n = n.strip_suffix(".exe").unwrap_or(n);
-    n.trim().to_ascii_lowercase()
+    let n = n.trim().to_ascii_lowercase();
+    n.strip_suffix(".exe").unwrap_or(&n).to_string()
 }
 
 pub fn match_tool(

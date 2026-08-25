@@ -1,13 +1,17 @@
 use crate::config::Config;
+use crate::correlate;
 use crate::evidence::{Finding, Inventory, OverlayWindow};
+use crate::origin::{self, SignatureStatus};
 use crate::overlay::OverlayObservation;
 use crate::platform;
 use crate::process::{self, ProcessBaseline, ProcessTable};
 use crate::smbios::EnvironmentFacts;
+use std::collections::HashMap;
 use sysinfo::System;
 
 pub struct Collectors {
     processes: ProcessTable,
+    signatures: HashMap<String, SignatureStatus>,
 }
 
 pub struct Snapshot {
@@ -23,6 +27,7 @@ impl Collectors {
     pub fn new() -> Self {
         Self {
             processes: ProcessTable::new(),
+            signatures: HashMap::new(),
         }
     }
 
@@ -162,6 +167,23 @@ impl Collectors {
                 }
                 Err(e) => errors.push(format!("environment: {e}")),
             }
+        }
+
+        if config.monitoring.behavior {
+            let candidates = origin::candidate_pids(config, &procs, process_baseline, &findings);
+            for path in origin::paths_needing_signature(&procs, &candidates) {
+                let key = origin::signature_key(&path.to_string_lossy());
+                self.signatures
+                    .entry(key)
+                    .or_insert_with(|| platform::verify_signature(path));
+            }
+            findings.extend(origin::analyze(
+                config,
+                &procs,
+                &candidates,
+                &self.signatures,
+            ));
+            findings.extend(correlate::correlate(config, &findings));
         }
 
         let overlays = overlay_obs.iter().map(|o| o.to_window()).collect();

@@ -66,6 +66,7 @@ fn is_expected(config: &Config, finding: &Finding) -> bool {
         "display.virtual" | "display.dummy_edid" => false,
         "camera.virtual" => config.session.allow_virtual_camera,
         "audio.capture" => audio_is_expected(config, finding),
+        "process.behavior_cluster" => false,
         _ => false,
     }
 }
@@ -147,5 +148,25 @@ mod tests {
         assert!(!evaluate(&cfg, vec![f.clone()]).unexpected.is_empty());
         cfg.session.allow_vm_guest = true;
         assert!(evaluate(&cfg, vec![f]).unexpected.is_empty());
+    }
+
+    #[test]
+    fn behavior_cluster_is_never_expected() {
+        let cfg = Config::default();
+        let f = Finding::new(
+            Detector::Process,
+            "process.behavior_cluster",
+            Severity::High,
+            0.8,
+            "cluster",
+        )
+        .with_process(ProcessRef {
+            pid: 9,
+            name: "helper.exe".into(),
+            path: None,
+        });
+        let ev = evaluate(&cfg, vec![f]);
+        assert_eq!(ev.unexpected.len(), 1);
+        assert!(ev.alert);
     }
 }

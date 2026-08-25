@@ -39,6 +39,13 @@ pub struct MonitoringConfig {
     pub remote: bool,
     pub environment: bool,
     pub camera: bool,
+    /// Correlate weak origin/overlay/capture atoms on the same PID.
+    #[serde(default = "default_true")]
+    pub behavior: bool,
+}
+
+fn default_true() -> bool {
+    true
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -77,6 +84,7 @@ impl Default for Config {
                 remote: true,
                 environment: true,
                 camera: true,
+                behavior: true,
             },
             output: OutputConfig {
                 directory: "fairview-reports".into(),

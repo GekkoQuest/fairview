@@ -15,6 +15,10 @@ use std::process::Command;
 
 pub fn enrich_processes(_procs: &mut [ProcessSnapshot]) {}
 
+pub fn verify_signature(_path: &Path) -> crate::origin::SignatureStatus {
+    crate::origin::SignatureStatus::Unknown
+}
+
 pub fn collect_displays() -> Result<Vec<DisplayInfo>> {
     let mut displays = Vec::new();
     let Ok(entries) = fs::read_dir("/sys/class/drm") else {

@@ -12,6 +12,7 @@ It does **not** decide that someone is cheating. Reports talk about findings (a 
 | Overlays | Windows: `EnumWindows` + extended styles + `GetLayeredWindowAttributes` + `GetWindowDisplayAffinity` (`WDA_EXCLUDEFROMCAPTURE`). macOS: `CGWindowListCopyWindowInfo` (layer, alpha, sharing state). | “Any layered window.” Discord / NVIDIA / Steam overlays. The taskbar. |
 | Audio | Windows: WASAPI `IAudioSessionManager2` on **capture** endpoints, active sessions only, with PID. Linux: PipeWire `pw-dump` JSON (`Stream/Input/Audio`) or ALSA `/proc/asound`. | “Zoom is running.” “This Mac has a built-in mic.” `gdi32.dll` / `winmm.dll` loaded. |
 | Processes | `sysinfo` snapshot. Baseline keyed by PID **and** image path (PID reuse is a new process). Windows `OriginalFilename` from the version resource. Exact image-name match against a catalog. | Substring `contains("gpt")`. “Has screen capture permission” because `gdi32` is mapped. |
+| Behavior | Correlate independent *classes* on one PID: origin (unsigned / user-writable path / rename / new), stealth overlay, unexpected mic capture. Two origin atoms count as one class. Windows Authenticode via `WinVerifyTrust` (no UI, no network revocation), cached, only for candidate PIDs. | A neural net on process names. Flagging Zoom’s mic or Discord’s overlay. Counting GPUs. |
 | Environment | CPUID hypervisor leaf, SMBIOS (`GetSystemFirmwareTable('RSMB')` / DMI sysfs / `hw.model`), Hyper-V guest parameter key. | Calling a Windows 11 VBS/WSL2 host a VM. |
 | Remote | `GetSystemMetrics(SM_REMOTESESSION)` + `GlassSessionId` + `WTSClientProtocolType`. Linux: established sockets on 3389/5900 in `/proc/net/tcp`. | “Port 5900 is listening.” |
 | Cameras | SetupAPI camera/image classes (Windows), `/sys/class/video4linux` (Linux), `system_profiler -json` (macOS). | Treating every UVC device as cheating. |
@@ -65,6 +66,7 @@ display = true
 remote = true
 environment = true
 camera = true
+behavior = true              # correlate weak atoms on the same PID
 
 [output]
 directory = "fairview-reports"
@@ -85,6 +87,7 @@ Policy, not detectors, decides what is unexpected. A Zoom capture session is inf
 - `display.cloned_edid` — two outputs with the same manufacturer + product + **non-zero serial** (cloned EDID / splitter). Two identical model panels with serial 0 is only `display.same_model` (low).
 - `display.added` — monitor identity appeared after baseline.
 - `remote.session` — this logon session is RDP.
+- `process.behavior_cluster` — two or more independent classes on one PID (origin + stealth overlay, or origin + unexpected capture, …). Weak atoms such as `process.unsigned` / `process.user_writable_path` stay Low on their own.
 
 **Not flagged**
 
@@ -97,7 +100,7 @@ Policy, not detectors, decides what is unexpected. A Zoom capture session is inf
 
 ```
 src/
-  edid.rs smbios.rs overlay.rs display.rs policy.rs   # pure, unit-tested
+  edid.rs smbios.rs overlay.rs display.rs origin.rs correlate.rs policy.rs
   known.rs process.rs detect.rs session.rs
   platform/windows/   QueryDisplayConfig, WASAPI, WTS, SetupAPI, SMBIOS
   platform/linux/     DRM EDID, PipeWire/ALSA, /proc/net/tcp, DMI
